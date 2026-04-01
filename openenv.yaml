@@ -1,0 +1,40 @@
+name: PolicyPilot
+slug: policypilot
+version: 1.0.0
+description: >
+  PolicyPilot is an OpenEnv benchmark for enterprise compliance review of
+  expense and reimbursement cases.
+
+environment:
+  type: benchmark
+  entrypoint:
+    module: src.env.core
+    class: PolicyPilotEnv
+  api:
+    reset: reset
+    step: step
+    state: state
+
+tasks:
+  - name: compliance_review
+    difficulties: [easy, medium, hard]
+    success_metric:
+      name: score
+      threshold: 0.85
+      range: [0.0, 1.0]
+
+evaluation:
+  deterministic: true
+  reward_formula:
+    violation_detection: 0.25
+    evidence_handling: 0.25
+    decision_correctness: 0.30
+    audit_quality: 0.20
+  penalties:
+    invalid_action: -0.2
+    unsafe_approval: -0.5
+    repeated_useless_action: -0.1
+    skipped_required_steps: -0.3
+
+reproducibility:
+  seed: 42
