@@ -1,3 +1,13 @@
+---
+title: PolicyPilot
+emoji: 🧾
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
+
 # PolicyPilot: Compliance Review Benchmark (OpenEnv)
 
 PolicyPilot is a deterministic benchmark for enterprise expense and reimbursement compliance review.
@@ -181,8 +191,27 @@ Required log format emitted to stdout:
 [STEP]  step=<n> action=<action_json> reward=<0.00> done=<true|false> error=<msg|null>
 [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
 ```
+## Live Deployment
+
+Hugging Face Space:
+https://divyam-r25-policypilot.hf.space
+
+### Public endpoints
+- `GET /health`
+- `POST /reset`
+- `POST /step`
+- `GET /state`
+- `GET /grade`
 
 ### API Server
+
+## Validation
+
+Verified locally and on Hugging Face Space:
+- `pytest -q`
+- `docker build -t policypilot .`
+- `docker run -p 7860:7860 policypilot`
+- Public endpoint tests on Hugging Face Space
 
 ```bash
 cd policypilot
