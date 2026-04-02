@@ -1,27 +1,33 @@
 ---
+
 title: PolicyPilot
 emoji: 🧾
 colorFrom: blue
 colorTo: indigo
 sdk: docker
 pinned: false
----
-
+-------------
 
 # PolicyPilot: Compliance Review Benchmark (OpenEnv)
 
 PolicyPilot is a deterministic benchmark for enterprise expense and reimbursement compliance review.
 It evaluates policy grounding, workflow correctness, safe decision making, and audit-quality reasoning.
 
+It is designed to test whether an agent can make policy-compliant decisions under ambiguity, incomplete evidence, and workflow constraints—similar to real internal finance/compliance review systems used in enterprises.
+
+---
+
 ## Highlights
 
-- OpenEnv-style environment API: `reset()`, `step()`, `state()`
-- Strict typed action schema with validator penalties
-- Dense rewards with explicit unsafe-action penalties
-- Deterministic graders with structured subscores
-- Difficulty progression (`easy`, `medium`, `hard`)
-- Hard suite includes ambiguity, conflicts, duplicate claims, and fraud signals
-- API server mode plus competition runner mode in `inference.py`
+* OpenEnv-style environment API: `reset()`, `step()`, `state()`
+* Strict typed action schema with validator penalties
+* Dense rewards with explicit unsafe-action penalties
+* Deterministic graders with structured subscores
+* Difficulty progression (`easy`, `medium`, `hard`)
+* Hard suite includes ambiguity, conflicts, duplicate claims, and fraud signals
+* API server mode plus competition runner mode in `inference.py`
+
+---
 
 ## Repository Structure
 
@@ -59,16 +65,20 @@ policypilot/
     test_reproducibility.py
 ```
 
+---
+
 ## Environment API
 
 `PolicyPilotEnv`:
 
-- `reset(difficulty: str, scenario_variant: Optional[int] = None) -> Observation`
-- `step(action: dict) -> (Observation, Reward, Done, Info)`
-- `state() -> InternalState`
-- `grade() -> Deterministic grade report`
+* `reset(difficulty: str, scenario_variant: Optional[int] = None) -> Observation`
+* `step(action: dict) -> (Observation, Reward, Done, Info)`
+* `state() -> InternalState`
+* `grade() -> Deterministic grade report`
 
 `state()` and `grade()` include `episode_trace` for full step-by-step auditability.
+
+---
 
 ## Action Schema (Strict)
 
@@ -83,16 +93,18 @@ policypilot/
 }
 ```
 
-Allowed actions:
+### Allowed actions
 
-- `approve_case`
-- `reject_case`
-- `request_missing_info`
-- `escalate_case`
-- `flag_for_manual_review`
-- `add_audit_note`
+* `approve_case`
+* `reject_case`
+* `request_missing_info`
+* `escalate_case`
+* `flag_for_manual_review`
+* `add_audit_note`
 
 Invalid actions are penalized (`-0.2`) and kept in trace output.
+
+---
 
 ## Reward Function
 
@@ -105,34 +117,38 @@ reward =
   penalties
 ```
 
-Penalties:
+### Penalties
 
-- `invalid_action`: `-0.2`
-- `unsafe_approval`: `-0.5`
-- `repeated_useless_action`: `-0.1`
-- `skipped_required_steps`: `-0.3`
+* `invalid_action`: `-0.2`
+* `unsafe_approval`: `-0.5`
+* `repeated_useless_action`: `-0.1`
+* `skipped_required_steps`: `-0.3`
+
+---
 
 ## Hard Cases
 
 Hard scenarios include:
 
-- Mixed personal + business expenses
-- Conflicting rule hierarchy paths
-- Partial and scope-limited approvals
-- Non-USD FX documentation requirements
-- Duplicate-claim detection (`flag_for_manual_review`)
-- Fraudulent receipt rejection
-- Pending exception escalation
+* Mixed personal + business expenses
+* Conflicting rule hierarchy paths
+* Partial and scope-limited approvals
+* Non-USD FX documentation requirements
+* Duplicate-claim detection (`flag_for_manual_review`)
+* Fraudulent receipt rejection
+* Pending exception escalation
+
+---
 
 ## Deterministic Grading
 
 Each grade output contains:
 
-- `score` in `[0.0, 1.0]`
-- `success` with threshold `>= 0.85`
-- `components`
-- `subscores`
-- `episode_trace`
+* `score` in `[0.0, 1.0]`
+* `success` with threshold `>= 0.85`
+* `components`
+* `subscores`
+* `episode_trace`
 
 Example:
 
@@ -151,16 +167,20 @@ Example:
 }
 ```
 
+---
+
 ## Baseline Benchmark Snapshot (seed=42)
 
-| Task | Score |
-|------|------:|
-| easy | 1.00 |
-| medium | 0.92 |
-| hard | 0.70 |
-| avg | 0.8733 |
+| Task   |  Score |
+| ------ | -----: |
+| easy   |   1.00 |
+| medium |   0.92 |
+| hard   |   0.70 |
+| avg    | 0.8733 |
 
-This profile is intentional: the baseline handles straightforward policy checks but degrades on harder ambiguity and duplicate/fraud cases.
+This profile is intentional: the baseline handles straightforward policy checks but degrades on harder ambiguity and fraud-like cases.
+
+---
 
 ## Inference Modes
 
@@ -169,6 +189,8 @@ This profile is intentional: the baseline handles straightforward policy checks 
 1. Competition benchmark runner (default)
 2. API server (`--serve`)
 
+---
+
 ### Competition Runner
 
 ```bash
@@ -176,42 +198,34 @@ cd policypilot
 python inference.py --run-benchmark --difficulties easy,medium,hard --max-steps 8 --seed 42
 ```
 
-Runner uses env vars:
+Uses environment variables:
 
-- `API_BASE_URL`
-- `MODEL_NAME`
-- `HF_TOKEN`
+* `API_BASE_URL`
+* `MODEL_NAME`
+* `HF_TOKEN`
 
-If those are not provided or the client fails to initialize, it automatically falls back to the baseline agent.
+If unavailable, it falls back to the baseline agent.
 
-Required log format emitted to stdout:
+---
 
-```text
-[START] task=<task_name> env=<benchmark> model=<model_name>
-[STEP]  step=<n> action=<action_json> reward=<0.00> done=<true|false> error=<msg|null>
-[END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
-```
 ## Live Deployment
 
 Hugging Face Space:
 https://divyam-r25-policypilot.hf.space
 
 ### Public endpoints
-- `GET /health`
-- `POST /reset`
-- `POST /step`
-- `GET /state`
-- `GET /grade`
 
-### API Server
+* `GET /health`
+* `POST /reset`
+* `POST /step`
+* `GET /state`
+* `GET /grade`
 
-## Validation
+---
 
-Verified locally and on Hugging Face Space:
-- `pytest -q`
-- `docker build -t policypilot .`
-- `docker run -p 7860:7860 policypilot`
-- Public endpoint tests on Hugging Face Space
+## API Server
+
+Run locally:
 
 ```bash
 cd policypilot
@@ -220,18 +234,29 @@ python inference.py --serve
 
 Endpoints:
 
-- `GET /health`
-- `POST /reset`
-- `POST /step`
-- `GET /state`
-- `GET /grade`
-- `POST /act`
-- `POST /run_episode`
-- `POST /run_benchmark`
+* `GET /health`
+* `POST /reset`
+* `POST /step`
+* `GET /state`
+* `GET /grade`
+* `POST /act`
+* `POST /run_episode`
+* `POST /run_benchmark`
+
+---
+
+## Validation
+
+Verified locally and on Hugging Face Space:
+
+* `pytest -q`
+* `docker build -t policypilot .`
+* `docker run -p 7860:7860 policypilot`
+* Public endpoint tests on Hugging Face Space
+
+---
 
 ## Docker
-
-Build and run:
 
 ```bash
 cd policypilot
@@ -239,39 +264,51 @@ docker build -t policypilot .
 docker run -p 7860:7860 policypilot
 ```
 
-Container launches API mode via `python inference.py --serve`.
+Container launches API via:
+
+```bash
+python inference.py --serve
+```
+
+---
 
 ## OpenEnv Config
 
-`openenv.yaml` includes:
+`openenv.yaml` defines:
 
-- deterministic evaluation metadata
-- environment entrypoint
-- reward weights and penalties
-- task difficulties and success threshold
+* deterministic evaluation metadata
+* environment entrypoint
+* reward shaping
+* penalties
+* task difficulties
+* success threshold
+
+---
 
 ## Tests
-
-Run:
 
 ```bash
 cd policypilot
 python -m pytest -q
 ```
 
-Covered checks include:
+### Coverage includes:
 
-- `reset()` behavior and state clearing
-- valid step transition
-- invalid action penalties
-- reward behavior (unsafe approval and correct decision)
-- grader outputs/subscores
-- reproducibility with fixed seed
-- baseline hard score not higher than easy score
+* reset correctness
+* valid step transitions
+* invalid action penalties
+* reward correctness
+* grader outputs
+* reproducibility (fixed seed)
+* difficulty ordering behavior
 
-## HuggingFace Spaces (Docker SDK)
+---
 
-1. Create a new Docker Space.
-2. Push this directory.
-3. Ensure exposed port is `7860`.
-4. Validate `/health`, `/reset`, `/step` on deployed URL.
+## Hugging Face Spaces (Docker SDK)
+
+1. Create a Docker Space
+2. Push this repository
+3. Ensure port `7860` is exposed
+4. Validate `/health`, `/reset`, `/step` endpoints
+
+---
