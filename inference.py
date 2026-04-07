@@ -345,9 +345,13 @@ def health():
 
 
 @app.post("/reset")
-def reset(req: ResetRequest):
+def reset(req: Optional[ResetRequest] = None):
     try:
-        observation = env.reset(difficulty=req.difficulty, scenario_variant=req.scenario_variant)
+        parsed_req = req or ResetRequest()
+        observation = env.reset(
+            difficulty=parsed_req.difficulty,
+            scenario_variant=parsed_req.scenario_variant,
+        )
         return {
             "observation": observation,
             "state": env.state(),

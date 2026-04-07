@@ -1,12 +1,11 @@
 ---
-
 title: PolicyPilot
 emoji: 🧾
 colorFrom: blue
 colorTo: indigo
 sdk: docker
 pinned: false
--------------
+---
 
 # PolicyPilot: Compliance Review Benchmark (OpenEnv)
 
