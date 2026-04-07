@@ -6,7 +6,7 @@ colorFrom: blue
 colorTo: indigo
 sdk: docker
 pinned: false
--------------
+---
 
 # PolicyPilot: Compliance Review Benchmark (OpenEnv)
 
@@ -202,7 +202,7 @@ Uses environment variables:
 
 * `API_BASE_URL`
 * `MODEL_NAME`
-* `HF_TOKEN`
+* `API_KEY`
 
 If unavailable, it falls back to the baseline agent.
 

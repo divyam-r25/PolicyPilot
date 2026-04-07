@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover - optional runtime dependency path
 
 ENV_NAME = "policypilot"
 DEFAULT_MODEL_NAME = "baseline-policy-agent"
-REQUIRED_ENV_VARS = ("API_BASE_URL", "MODEL_NAME", "HF_TOKEN")
+REQUIRED_ENV_VARS = ("API_BASE_URL", "MODEL_NAME", "API_KEY")
 
 
 class ResetRequest(BaseModel):
@@ -116,7 +116,7 @@ def _fallback_action(observation: Dict[str, Any]) -> Dict[str, Any]:
 def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     api_base_url = os.getenv("API_BASE_URL", "").strip()
     model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME).strip() or DEFAULT_MODEL_NAME
-    hf_token = os.getenv("HF_TOKEN", "").strip()
+    api_key = os.getenv("API_KEY", "").strip()
 
     missing = [key for key in REQUIRED_ENV_VARS if not os.getenv(key, "").strip()]
     if missing:
@@ -124,7 +124,7 @@ def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     if OpenAI is None:
         return None, model_name, "openai package unavailable; using baseline fallback."
     try:
-        client = OpenAI(base_url=api_base_url, api_key=hf_token)
+        client = OpenAI(base_url=api_base_url, api_key=api_key)
     except Exception as exc:  # pragma: no cover - runtime path
         return None, model_name, f"OpenAI client init failed: {exc}"
     return client, model_name, None
