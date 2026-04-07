@@ -6,7 +6,7 @@ colorFrom: blue
 colorTo: indigo
 sdk: docker
 pinned: false
----
+-------------
 
 # PolicyPilot: Compliance Review Benchmark (OpenEnv)
 
@@ -15,7 +15,29 @@ It evaluates policy grounding, workflow correctness, safe decision making, and a
 
 It is designed to test whether an agent can make policy-compliant decisions under ambiguity, incomplete evidence, and workflow constraints—similar to real internal finance/compliance review systems used in enterprises.
 
----
+## Architecture Overview
+
+PolicyPilot consists of:
+
+* a deterministic environment with typed state transitions
+* a structured action interface for safe agent interaction
+* deterministic graders with structured subscores
+* a rule-based baseline agent
+* an optional LLM-driven agent evaluated through OpenEnv-compatible APIs
+
+This allows both symbolic and LLM-based agents to be tested under the same environment contract.
+
+## Why This Benchmark is Challenging
+
+Unlike simple classification tasks, PolicyPilot requires:
+
+* multi-step reasoning across policy rules
+* handling incomplete or conflicting evidence
+* safe decision-making under uncertainty
+* structured action outputs with audit reasoning
+* workflow correctness instead of just final-answer correctness
+
+This makes it closer to real-world enterprise compliance workflows than a standard single-turn benchmark.
 
 ## Highlights
 
@@ -27,11 +49,9 @@ It is designed to test whether an agent can make policy-compliant decisions unde
 * Hard suite includes ambiguity, conflicts, duplicate claims, and fraud signals
 * API server mode plus competition runner mode in `inference.py`
 
----
-
 ## Repository Structure
 
-```text
+```text id="ls0z3r"
 policypilot/
   openenv.yaml
   Dockerfile
@@ -65,11 +85,9 @@ policypilot/
     test_reproducibility.py
 ```
 
----
-
 ## Environment API
 
-`PolicyPilotEnv`:
+`PolicyPilotEnv` exposes:
 
 * `reset(difficulty: str, scenario_variant: Optional[int] = None) -> Observation`
 * `step(action: dict) -> (Observation, Reward, Done, Info)`
@@ -78,11 +96,9 @@ policypilot/
 
 `state()` and `grade()` include `episode_trace` for full step-by-step auditability.
 
----
-
 ## Action Schema (Strict)
 
-```json
+```json id="v9r4u5"
 {
   "action_type": "request_missing_info",
   "case_id": "C-102",
@@ -104,11 +120,9 @@ policypilot/
 
 Invalid actions are penalized (`-0.2`) and kept in trace output.
 
----
-
 ## Reward Function
 
-```text
+```text id="jlwmrt"
 reward =
   0.25 * violation_detection +
   0.25 * evidence_handling +
@@ -124,8 +138,6 @@ reward =
 * `repeated_useless_action`: `-0.1`
 * `skipped_required_steps`: `-0.3`
 
----
-
 ## Hard Cases
 
 Hard scenarios include:
@@ -137,8 +149,6 @@ Hard scenarios include:
 * Duplicate-claim detection (`flag_for_manual_review`)
 * Fraudulent receipt rejection
 * Pending exception escalation
-
----
 
 ## Deterministic Grading
 
@@ -152,7 +162,7 @@ Each grade output contains:
 
 Example:
 
-```json
+```json id="p26d1s"
 {
   "difficulty": "hard",
   "score": 0.72,
@@ -167,8 +177,6 @@ Example:
 }
 ```
 
----
-
 ## Baseline Benchmark Snapshot (seed=42)
 
 | Task   |  Score |
@@ -180,34 +188,48 @@ Example:
 
 This profile is intentional: the baseline handles straightforward policy checks but degrades on harder ambiguity and fraud-like cases.
 
----
-
 ## Inference Modes
 
 `inference.py` supports two modes:
 
-1. Competition benchmark runner (default)
+1. Competition benchmark runner
 2. API server (`--serve`)
-
----
 
 ### Competition Runner
 
-```bash
+```bash id="e7i6c7"
 cd policypilot
 python inference.py --run-benchmark --difficulties easy,medium,hard --max-steps 8 --seed 42
 ```
 
-Uses environment variables:
+### API Server
+
+```bash id="vgvtrq"
+cd policypilot
+python inference.py --serve
+```
+
+## LLM Proxy Compliance (Hackathon Requirement)
+
+PolicyPilot uses the injected LiteLLM-compatible proxy for all remote LLM calls.
+
+### Remote LLM configuration
+
+The OpenAI-compatible client is initialized using:
 
 * `API_BASE_URL`
 * `API_KEY`
 * `MODEL_NAME` (optional)
 
-`API_BASE_URL` and `API_KEY` are required for proxy-backed LLM calls.
-If they are unavailable, PolicyPilot falls back to the baseline agent.
+### Compliance guarantees
 
----
+* No hardcoded API credentials are used.
+* `API_BASE_URL` is always respected when remote LLM mode is enabled.
+* A mandatory verification call is executed at startup to ensure the proxy is actually used.
+* If proxy credentials are present but invalid, execution fails instead of silently bypassing the proxy.
+* If proxy credentials are not provided, PolicyPilot uses a baseline agent for local development only.
+
+This ensures compatibility with environments that require proxy-backed validation.
 
 ## Live Deployment
 
@@ -221,30 +243,9 @@ https://divyam-r25-policypilot.hf.space
 * `POST /step`
 * `GET /state`
 * `GET /grade`
-
----
-
-## API Server
-
-Run locally:
-
-```bash
-cd policypilot
-python inference.py --serve
-```
-
-Endpoints:
-
-* `GET /health`
-* `POST /reset`
-* `POST /step`
-* `GET /state`
-* `GET /grade`
 * `POST /act`
 * `POST /run_episode`
 * `POST /run_benchmark`
-
----
 
 ## Validation
 
@@ -253,25 +254,22 @@ Verified locally and on Hugging Face Space:
 * `pytest -q`
 * `docker build -t policypilot .`
 * `docker run -p 7860:7860 policypilot`
-* Public endpoint tests on Hugging Face Space
-
----
+* public endpoint tests on Hugging Face Space
+* benchmark runner tested with injected proxy environment variables
 
 ## Docker
 
-```bash
+```bash id="79utru"
 cd policypilot
 docker build -t policypilot .
 docker run -p 7860:7860 policypilot
 ```
 
-Container launches API via:
+Container launches the API server via:
 
-```bash
+```bash id="ofvrxk"
 python inference.py --serve
 ```
-
----
 
 ## OpenEnv Config
 
@@ -284,16 +282,14 @@ python inference.py --serve
 * task difficulties
 * success threshold
 
----
-
 ## Tests
 
-```bash
+```bash id="h2w9zh"
 cd policypilot
 python -m pytest -q
 ```
 
-### Coverage includes:
+### Coverage includes
 
 * reset correctness
 * valid step transitions
@@ -303,13 +299,22 @@ python -m pytest -q
 * reproducibility (fixed seed)
 * difficulty ordering behavior
 
----
-
 ## Hugging Face Spaces (Docker SDK)
 
 1. Create a Docker Space
 2. Push this repository
 3. Ensure port `7860` is exposed
-4. Validate `/health`, `/reset`, `/step` endpoints
+4. Validate `/health`, `/reset`, `/step`, `/state`, and `/grade`
 
----
+## Submission Checklist
+
+* OpenEnv API implemented (`reset`, `step`, `state`, `grade`)
+* Deterministic graders with structured subscores
+* Multi-difficulty tasks (`easy`, `medium`, `hard`)
+* Reward shaping with penalties
+* Dockerized deployment
+* Hugging Face Space deployment
+* Public API endpoints verified
+* LLM proxy integration using `API_BASE_URL` and `API_KEY`
+* No hardcoded credentials
+* Baseline fallback restricted to local development mode
