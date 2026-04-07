@@ -224,16 +224,16 @@ def _print_start(task: str, model: str) -> None:
 
 def _print_step(i: int, action: Dict[str, Any], reward: float, done: bool, error: Optional[str]) -> None:
     print(
-        f"[STEP]  step={i} action={_compact_json(action)} reward={reward:.2f} "
+        f"[STEP] step={i} action={_compact_json(action)} reward={reward:.2f} "
         f"done={str(done).lower()} error={_sanitize_error_text(error)}",
         flush=True,
     )
 
 
-def _print_end(success: bool, rewards: List[float]) -> None:
+def _print_end(task: str, score: float, success: bool, rewards: List[float]) -> None:
     print(
-        f"[END]   success={str(success).lower()} steps={len(rewards)} "
-        f"rewards={','.join(f'{r:.2f}' for r in rewards)}",
+        f"[END] task={task} score={score:.2f} steps={len(rewards)} "
+        f"success={str(success).lower()} rewards={','.join(f'{r:.2f}' for r in rewards)}",
         flush=True,
     )
 
@@ -267,12 +267,13 @@ def run_single_task(
             break
 
     grade = local_env.grade()
-    success = grade.get("success", False)
-    _print_end(success, rewards)
+    score = float(grade.get("score", 0.0))
+    success = bool(grade.get("success", False))
+    _print_end(task, score, success, rewards)
 
     return {
         "task": difficulty,
-        "score": grade.get("score", 0.0),
+        "score": score,
         "success": success,
         "components": grade.get("components", {}),
         "subscores": grade.get("subscores", {}),
@@ -463,13 +464,10 @@ def main():
     if args.serve:
         uvicorn.run(app, host=args.host, port=args.port)
 
-    elif args.run_benchmark:
+    else:
         difficulties = [d.strip() for d in args.difficulties.split(",") if d.strip()]
         result = run_benchmark(difficulties=difficulties, max_steps=args.max_steps, seed=args.seed)
-        print(json.dumps(result, indent=2))
-
-    else:
-        parser.print_help()
+        print(json.dumps(result, indent=2), flush=True)
 
 
 if __name__ == "__main__":
