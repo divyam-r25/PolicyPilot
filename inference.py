@@ -4,7 +4,8 @@ import argparse
 import json
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Tuple
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -21,8 +22,8 @@ except ImportError:  # pragma: no cover - optional runtime dependency path
 
 
 ENV_NAME = "policypilot"
-DEFAULT_MODEL_NAME = "baseline-policy-agent"
-REQUIRED_ENV_VARS = ("API_BASE_URL", "MODEL_NAME", "API_KEY")
+DEFAULT_MODEL_NAME = "gpt-4.1-mini"
+REQUIRED_ENV_VARS = ("API_BASE_URL", "API_KEY")
 
 
 class ResetRequest(BaseModel):
@@ -113,9 +114,17 @@ def _fallback_action(observation: Dict[str, Any]) -> Dict[str, Any]:
     return _normalize_action(action, observation)
 
 
+def _resolve_model_name() -> str:
+    for key in ("MODEL_NAME", "MODEL", "OPENAI_MODEL"):
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+    return DEFAULT_MODEL_NAME
+
+
 def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     api_base_url = os.getenv("API_BASE_URL", "").strip()
-    model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME).strip() or DEFAULT_MODEL_NAME
+    model_name = _resolve_model_name()
     api_key = os.getenv("API_KEY", "").strip()
 
     missing = [key for key in REQUIRED_ENV_VARS if not os.getenv(key, "").strip()]
@@ -128,6 +137,11 @@ def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     except Exception as exc:  # pragma: no cover - runtime path
         return None, model_name, f"OpenAI client init failed: {exc}"
     return client, model_name, None
+
+
+@lru_cache(maxsize=1)
+def _cached_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
+    return _make_openai_client()
 
 
 def _llm_action(client: Any, model_name: str, observation: Dict[str, Any]) -> Dict[str, Any]:
@@ -379,12 +393,23 @@ def grade() -> Dict[str, Any]:
 
 @app.post("/act")
 def act(request: ActRequest) -> Dict[str, Any]:
-    action, log_line = baseline_agent.act_with_log(request.observation)
+    llm_client, model_name, startup_error = _cached_openai_client()
+    action, action_error = _select_action(
+        observation=request.observation,
+        llm_client=llm_client,
+        model_name=model_name,
+    )
+    error_parts = [part for part in (startup_error, action_error) if part]
+    if error_parts:
+        log_line = " | ".join(error_parts)
+    else:
+        log_line = f"llm_action:model={model_name}"
     return {"action": action, "log": log_line}
 
 
 @app.post("/run_episode")
 def run_episode(request: RunEpisodeRequest) -> Dict[str, Any]:
+    llm_client, model_name, startup_error = _cached_openai_client()
     try:
         observation = env.reset(difficulty=request.difficulty, scenario_variant=request.variant)
     except ValueError as exc:
@@ -395,7 +420,16 @@ def run_episode(request: RunEpisodeRequest) -> Dict[str, Any]:
     info: Dict[str, Any] = {}
 
     for _ in range(request.max_steps):
-        action, log_line = baseline_agent.act_with_log(observation)
+        action, action_error = _select_action(
+            observation=observation,
+            llm_client=llm_client,
+            model_name=model_name,
+        )
+        error_parts = [part for part in (startup_error, action_error) if part]
+        if error_parts:
+            log_line = " | ".join(error_parts)
+        else:
+            log_line = f"llm_action:model={model_name}"
         observation, reward, done, info = env.step(action)
         trajectory.append(
             {

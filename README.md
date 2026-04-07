@@ -201,10 +201,11 @@ python inference.py --run-benchmark --difficulties easy,medium,hard --max-steps 
 Uses environment variables:
 
 * `API_BASE_URL`
-* `MODEL_NAME`
 * `API_KEY`
+* `MODEL_NAME` (optional)
 
-If unavailable, it falls back to the baseline agent.
+`API_BASE_URL` and `API_KEY` are required for proxy-backed LLM calls.
+If they are unavailable, PolicyPilot falls back to the baseline agent.
 
 ---
 
