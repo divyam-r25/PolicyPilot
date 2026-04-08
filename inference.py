@@ -299,16 +299,18 @@ def _print_start(task: str, model: str) -> None:
 
 def _print_step(i: int, action: Dict[str, Any], reward: float, done: bool, error: Optional[str]) -> None:
     print(
-        f"[STEP] step={i} action={_compact_json(action)} reward={reward:.2f} "
+        f"[STEP]  step={i} action={_compact_json(action)} reward={reward:.2f} "
         f"done={str(done).lower()} error={_sanitize_error_text(error)}",
         flush=True,
     )
 
 
 def _print_end(task: str, score: float, success: bool, rewards: List[float]) -> None:
+    # Keep task/score args in signature for backward compatibility with existing calls.
+    _ = task, score
     print(
-        f"[END] task={task} score={score:.4f} steps={len(rewards)} "
-        f"success={str(success).lower()} rewards={','.join(f'{r:.2f}' for r in rewards)}",
+        f"[END]   success={str(success).lower()} steps={len(rewards)} "
+        f"rewards={','.join(f'{r:.2f}' for r in rewards)}",
         flush=True,
     )
 
@@ -375,6 +377,10 @@ def run_benchmark(
     - Never crash if proxy init fails unless strict mode is enabled.
     - Always produce structured stdout.
     """
+    normalized_difficulties = [d.lower().strip() for d in difficulties if isinstance(d, str) and d.strip()]
+    if not normalized_difficulties:
+        raise ValueError("difficulties must contain at least one non-empty value.")
+
     strict_remote_llm = _should_require_remote_llm(require_remote_llm)
     startup_error = None
 
@@ -393,7 +399,7 @@ def run_benchmark(
         raise RuntimeError(startup_error or "Remote LLM mode required but proxy client was not initialized.")
 
     results = []
-    for difficulty in difficulties:
+    for difficulty in normalized_difficulties:
         results.append(
             run_single_task(
                 difficulty=difficulty,
@@ -487,12 +493,22 @@ def step(req: StepRequest):
 
 @app.get("/state")
 def state():
-    return env.state()
+    try:
+        return env.state()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/grade")
 def grade():
-    return env.grade()
+    try:
+        return env.grade()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/act")
@@ -536,6 +552,8 @@ def run_episode_route(req: RunEpisodeRequest):
             seed=req.seed,
             require_remote_llm=req.require_remote_llm,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -549,6 +567,8 @@ def run_benchmark_route(req: RunBenchmarkRequest):
             seed=req.seed,
             require_remote_llm=req.require_remote_llm,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -587,7 +607,7 @@ def main():
             seed=args.seed,
             require_remote_llm=args.require_remote_llm,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         print(f"[FATAL] {exc}", flush=True)
         raise SystemExit(2)
 

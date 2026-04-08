@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+import pytest
 
 import inference
 from src.env.core import PolicyPilotEnv
@@ -62,3 +63,48 @@ def test_act_returns_valid_action_after_reset(monkeypatch) -> None:
     assert isinstance(action["payload"], dict)
     assert isinstance(action["reason"], str) and action["reason"].strip()
     assert payload["error"] is None
+
+
+def test_state_and_grade_require_reset_first() -> None:
+    inference.env = PolicyPilotEnv(seed=42)
+    client = TestClient(inference.app)
+
+    state_response = client.get("/state")
+    assert state_response.status_code == 400
+    assert "reset" in state_response.json()["detail"].lower()
+
+    grade_response = client.get("/grade")
+    assert grade_response.status_code == 400
+    assert "reset" in grade_response.json()["detail"].lower()
+
+
+def test_run_benchmark_rejects_empty_difficulties(monkeypatch) -> None:
+    monkeypatch.setattr(inference, "_cached_openai_client", _offline_client)
+    with pytest.raises(ValueError, match="difficulties"):
+        inference.run_benchmark(
+            difficulties=["", "  "],
+            max_steps=2,
+            seed=42,
+        )
+
+
+def test_run_benchmark_route_invalid_difficulty_returns_400(monkeypatch) -> None:
+    monkeypatch.setattr(inference, "_cached_openai_client", _offline_client)
+    client = TestClient(inference.app)
+
+    response = client.post(
+        "/run_benchmark",
+        json={"difficulties": ["impossible"], "max_steps": 2, "seed": 42},
+    )
+
+    assert response.status_code == 400
+    assert "unsupported difficulty" in response.json()["detail"].lower()
+
+
+def test_benchmark_log_format_contains_required_prefixes(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(inference, "_cached_openai_client", _offline_client)
+    inference.run_benchmark(difficulties=["easy"], max_steps=1, seed=42)
+    output = capsys.readouterr().out
+
+    assert "[STEP]  step=" in output
+    assert "[END]   success=" in output
