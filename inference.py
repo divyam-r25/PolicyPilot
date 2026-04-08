@@ -23,12 +23,8 @@ except ImportError:
 ENV_NAME = "policypilot"
 DEFAULT_MODEL_NAME = "gpt-4.1-mini"
 DEFAULT_HF_ROUTER_BASE_URL = "https://router.huggingface.co/v1"
-API_KEY_ENV_CANDIDATES = (
-    "API_KEY",
-    "HF_TOKEN",
-    "HUGGINGFACEHUB_API_TOKEN",
-    "HUGGING_FACE_HUB_TOKEN",
-)
+ENV_NOT_INITIALIZED_DETAIL = "Environment is not initialized. Call reset() first."
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 PLACEHOLDER_TOKEN_HINTS = (
     "your_actual_token_here",
     "your_token_here",
@@ -40,7 +36,10 @@ PLACEHOLDER_TOKEN_HINTS = (
 
 
 def _resolve_model_name() -> str:
-    return os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
+    model_name = os.getenv("MODEL_NAME")
+    if model_name and model_name.strip():
+        return model_name.strip()
+    return DEFAULT_MODEL_NAME
 
 
 def _env_truthy(name: str) -> bool:
@@ -50,23 +49,18 @@ def _env_truthy(name: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _resolve_api_key() -> Tuple[Optional[str], Optional[str]]:
-    for env_name in API_KEY_ENV_CANDIDATES:
-        value = os.getenv(env_name)
-        if value and value.strip():
-            return value.strip(), env_name
-    return None, None
-
-
-def _resolve_api_base_url(api_key: Optional[str]) -> Optional[str]:
-    explicit_base_url = os.getenv("API_BASE_URL")
-    if explicit_base_url and explicit_base_url.strip():
-        return explicit_base_url.strip()
-
-    if api_key:
-        return DEFAULT_HF_ROUTER_BASE_URL
-
+def _resolve_hf_token() -> Optional[str]:
+    token = os.getenv("HF_TOKEN")
+    if token and token.strip():
+        return token.strip()
     return None
+
+
+def _resolve_api_base_url() -> str:
+    api_base_url = os.getenv("API_BASE_URL")
+    if api_base_url and api_base_url.strip():
+        return api_base_url.strip()
+    return DEFAULT_HF_ROUTER_BASE_URL
 
 
 def _looks_like_placeholder_token(token: str) -> bool:
@@ -91,37 +85,35 @@ def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     Important behavior:
     - If proxy env vars exist, we ATTEMPT a real proxy call so validator can detect usage.
     - If that call fails, we DO NOT crash the entire script.
-      We log a warning and return fallback mode.
+      We return fallback mode and propagate the startup error in payload.
     """
-    api_key, api_key_env = _resolve_api_key()
-    api_base_url = _resolve_api_base_url(api_key)
+    hf_token = _resolve_hf_token()
+    api_base_url = _resolve_api_base_url()
     model_name = _resolve_model_name()
 
-    if not (api_base_url and api_key):
+    if not hf_token:
         return (
             None,
             model_name,
-            "Missing remote LLM config. Set API_KEY (or HF_TOKEN) and optionally API_BASE_URL.",
+            "Missing remote LLM config. Set HF_TOKEN and optionally API_BASE_URL.",
         )
 
-    if _looks_like_placeholder_token(api_key):
-        hint_env = api_key_env or "API_KEY"
+    if _looks_like_placeholder_token(hf_token):
         return (
             None,
             model_name,
             (
-                f"{hint_env} appears to be a placeholder token. "
+                "HF_TOKEN appears to be a placeholder token. "
                 "Set a real Hugging Face token (starts with hf_) before running remote LLM mode."
             ),
         )
 
-    if "router.huggingface.co" in api_base_url and not api_key.startswith("hf_"):
-        hint_env = api_key_env or "API_KEY"
+    if "router.huggingface.co" in api_base_url and not hf_token.startswith("hf_"):
         return (
             None,
             model_name,
             (
-                f"{hint_env} does not look like a Hugging Face token. "
+                "HF_TOKEN does not look like a Hugging Face token. "
                 "Expected prefix 'hf_' for router.huggingface.co."
             ),
         )
@@ -132,7 +124,7 @@ def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     try:
         client = OpenAI(
             base_url=api_base_url,
-            api_key=api_key,
+            api_key=hf_token,
         )
 
         response = client.chat.completions.create(
@@ -144,25 +136,31 @@ def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
             max_tokens=5,
         )
 
-        text = (response.choices[0].message.content or "").strip()
-        print(f"[INFO] proxy_check={text}", flush=True)
-        print("[INFO] Proxy verification successful", flush=True)
+        _ = (response.choices[0].message.content or "").strip()
         return client, model_name, None
 
     except Exception as exc:
         raw_error = str(exc)
         if "401" in raw_error and "Invalid username or password." in raw_error:
             raw_error = (
-                f"{raw_error} Check API_KEY/HF_TOKEN value and token permissions on Hugging Face."
+                f"{raw_error} Check HF_TOKEN value and token permissions on Hugging Face."
             )
         error_msg = f"LLM proxy failed: {raw_error}"
-        print(f"[WARN] {error_msg}", flush=True)
         return None, model_name, error_msg
 
 
 @lru_cache(maxsize=1)
 def _cached_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     return _make_openai_client()
+
+
+def _is_env_initialized() -> bool:
+    return env.current_scenario is not None and env._state is not None  # type: ignore[attr-defined]
+
+
+def _require_initialized() -> None:
+    if not _is_env_initialized():
+        raise HTTPException(status_code=400, detail=ENV_NOT_INITIALIZED_DETAIL)
 
 
 app = FastAPI(title="PolicyPilot OpenEnv API", version="1.0.0")
@@ -383,7 +381,6 @@ def run_benchmark(
         client_mode = "openai" if llm_client is not None else "baseline_fallback"
     except Exception as exc:
         startup_error = str(exc)
-        print(f"[WARN] startup_error={startup_error}", flush=True)
 
         llm_client = None
         model_name = _resolve_model_name()
@@ -487,12 +484,18 @@ def step(req: StepRequest):
 
 @app.get("/state")
 def state():
-    return env.state()
+    try:
+        return env.state()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/grade")
 def grade():
-    return env.grade()
+    try:
+        return env.grade()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/act")
@@ -502,14 +505,8 @@ def act():
     otherwise baseline fallback.
     """
     try:
-        observation = {
-            "task": env.current_task,
-            "case": env.current_case,
-            "documents": env.current_documents,
-            "policy": env.current_policy,
-            "state": env.state(),
-            "allowed_actions": env.allowed_actions(),
-        }
+        _require_initialized()
+        observation = env._build_observation()  # type: ignore[attr-defined]
 
         try:
             llm_client, model_name, _ = _cached_openai_client()
@@ -523,6 +520,10 @@ def act():
             "model": model_name,
         }
 
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -574,7 +575,6 @@ def main():
         if _should_require_remote_llm(args.require_remote_llm):
             llm_client, _, startup_error = _cached_openai_client()
             if llm_client is None:
-                print(f"[FATAL] {startup_error}", flush=True)
                 raise SystemExit(2)
         uvicorn.run(app, host=args.host, port=args.port)
         return
@@ -587,8 +587,7 @@ def main():
             seed=args.seed,
             require_remote_llm=args.require_remote_llm,
         )
-    except RuntimeError as exc:
-        print(f"[FATAL] {exc}", flush=True)
+    except RuntimeError:
         raise SystemExit(2)
 
     print(json.dumps(result, indent=2), flush=True)
