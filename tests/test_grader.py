@@ -28,7 +28,7 @@ def test_grader_easy_medium_hard() -> None:
     )
     medium_grade = env.grade()
     assert medium_grade["score"] >= 0.85
-    assert 0.0 <= medium_grade["score"] <= 1.0
+    assert 0.0 < medium_grade["score"] < 1.0
 
     hard_observation = env.reset(difficulty="hard")
     hard_decision = env.current_scenario.gold.decision  # type: ignore[union-attr]

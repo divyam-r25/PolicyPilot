@@ -50,6 +50,6 @@ def test_baseline_hard_score_is_not_higher_than_easy() -> None:
     hard_env.step(hard_action)
     hard_score = hard_env.grade()["score"]
 
-    assert 0.0 <= easy_score <= 1.0
-    assert 0.0 <= hard_score <= 1.0
+    assert 0.0 < easy_score < 1.0
+    assert 0.0 < hard_score < 1.0
     assert hard_score <= easy_score

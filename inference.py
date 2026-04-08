@@ -306,7 +306,7 @@ def _print_step(i: int, action: Dict[str, Any], reward: float, done: bool, error
 
 def _print_end(task: str, score: float, success: bool, rewards: List[float]) -> None:
     print(
-        f"[END] task={task} score={score:.2f} steps={len(rewards)} "
+        f"[END] task={task} score={score:.4f} steps={len(rewards)} "
         f"success={str(success).lower()} rewards={','.join(f'{r:.2f}' for r in rewards)}",
         flush=True,
     )

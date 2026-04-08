@@ -4,6 +4,7 @@ from typing import Dict
 
 from ..env.models import Scenario
 from ..env.state import EnvState
+from .common import clamp_task_score
 
 
 def grade_case(state: EnvState, scenario: Scenario) -> Dict[str, object]:
@@ -47,10 +48,11 @@ def grade_case(state: EnvState, scenario: Scenario) -> Dict[str, object]:
         + 0.2 * workflow_correctness
         + 0.2 * audit_compliance
     )
+    normalized_score = clamp_task_score(score)
     return {
         "difficulty": "hard",
-        "score": round(min(score, 1.0), 4),
-        "success": score >= 0.85,
+        "score": normalized_score,
+        "success": normalized_score >= 0.85,
         "components": {
             "policy_interpretation": round(policy_interpretation, 4),
             "conflict_resolution": round(conflict_resolution, 4),
