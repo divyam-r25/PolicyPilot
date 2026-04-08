@@ -12,7 +12,7 @@ pinned: false
 PolicyPilot is a deterministic benchmark for enterprise expense and reimbursement compliance review.
 It evaluates policy grounding, workflow correctness, safe decision making, and audit-quality reasoning.
 
-It is designed to test whether an agent can make policy-compliant decisions under ambiguity, incomplete evidence, and workflow constraints—similar to real internal finance/compliance review systems used in enterprises.
+It is designed to test whether an agent can make policy-compliant decisions under ambiguity, incomplete evidence, and workflow constraints, similar to real internal finance/compliance review systems used in enterprises.
 
 ## Architecture Overview
 
@@ -82,6 +82,7 @@ policypilot/
     test_grader.py
     test_reward.py
     test_reproducibility.py
+    test_inference_proxy_modes.py
 ```
 
 ## Environment API
@@ -217,18 +218,47 @@ PolicyPilot uses the injected LiteLLM-compatible proxy for all remote LLM calls.
 The OpenAI-compatible client is initialized using:
 
 * `API_BASE_URL`
-* `API_KEY`
+* `API_KEY` (or `HF_TOKEN`, `HUGGINGFACEHUB_API_TOKEN`)
 * `MODEL_NAME` (optional)
+* `REQUIRE_REMOTE_LLM` (optional, set to `1` for submission strict mode)
+
+Reference template: `.env.example`
+
+### PowerShell example
+
+```powershell
+$env:API_BASE_URL="https://router.huggingface.co/v1"
+$env:API_KEY="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+$env:MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
+$env:REQUIRE_REMOTE_LLM="1"
+python inference.py --run-benchmark --difficulties easy,medium,hard --max-steps 8 --seed 42 --require-remote-llm
+```
 
 ### Compliance guarantees
 
 * No hardcoded API credentials are used.
 * `API_BASE_URL` is always respected when remote LLM mode is enabled.
 * A mandatory verification call is executed at startup to ensure the proxy is actually used.
-* If proxy credentials are present but invalid, execution fails instead of silently bypassing the proxy.
-* If proxy credentials are not provided, PolicyPilot uses a baseline agent for local development only.
+* Placeholder tokens are rejected with actionable errors before any remote call.
+* If `REQUIRE_REMOTE_LLM=1` (or `--require-remote-llm`), invalid proxy credentials fail fast and exit non-zero.
+* If strict mode is off, PolicyPilot can use a baseline fallback for local development.
 
 This ensures compatibility with environments that require proxy-backed validation.
+
+### Troubleshooting `401 Invalid username or password`
+
+If you see:
+
+```text
+LLM proxy failed: Error code: 401 - {'error': 'Invalid username or password.'}
+```
+
+check these first:
+
+* `API_KEY` is a real Hugging Face token (starts with `hf_`), not `hf_your_actual_token_here`.
+* The token has access to Inference Providers / Router usage.
+* `API_BASE_URL` is `https://router.huggingface.co/v1`.
+* `MODEL_NAME` is available on the router and your account has access.
 
 ## Live Deployment
 
@@ -255,6 +285,7 @@ Verified locally and on Hugging Face Space:
 * `docker run -p 7860:7860 policypilot`
 * public endpoint tests on Hugging Face Space
 * benchmark runner tested with injected proxy environment variables
+* strict remote mode benchmark dry run (`REQUIRE_REMOTE_LLM=1`)
 
 ## Docker
 
@@ -297,6 +328,7 @@ python -m pytest -q
 * grader outputs
 * reproducibility (fixed seed)
 * difficulty ordering behavior
+* proxy strict/fallback mode behavior
 
 ## Hugging Face Spaces (Docker SDK)
 
@@ -314,6 +346,7 @@ python -m pytest -q
 * Dockerized deployment
 * Hugging Face Space deployment
 * Public API endpoints verified
-* LLM proxy integration using `API_BASE_URL` and `API_KEY`
+* LLM proxy integration using `API_BASE_URL` and `API_KEY`/`HF_TOKEN`
+* Strict submission mode verified (`--require-remote-llm`, output shows `"client_mode": "openai"` and `"startup_error": null`)
 * No hardcoded credentials
 * Baseline fallback restricted to local development mode

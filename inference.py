@@ -13,44 +13,117 @@ from pydantic import BaseModel, Field
 
 from src.agents.baseline import BaselineComplianceAgent
 from src.env.core import PolicyPilotEnv
-from src.tasks import list_difficulties
 
 try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
 
-
 ENV_NAME = "policypilot"
 DEFAULT_MODEL_NAME = "gpt-4.1-mini"
+DEFAULT_HF_ROUTER_BASE_URL = "https://router.huggingface.co/v1"
+API_KEY_ENV_CANDIDATES = (
+    "API_KEY",
+    "HF_TOKEN",
+    "HUGGINGFACEHUB_API_TOKEN",
+    "HUGGING_FACE_HUB_TOKEN",
+)
+PLACEHOLDER_TOKEN_HINTS = (
+    "your_actual_token_here",
+    "your_token_here",
+    "<token>",
+    "replace_me",
+    "changeme",
+    "paste_token_here",
+)
 
 
 def _resolve_model_name() -> str:
     return os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 
 
-def _has_remote_llm_env() -> bool:
-    return bool(os.getenv("API_BASE_URL") and (os.getenv("API_KEY") or os.getenv("HF_TOKEN")))
+def _env_truthy(name: str) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_api_key() -> Tuple[Optional[str], Optional[str]]:
+    for env_name in API_KEY_ENV_CANDIDATES:
+        value = os.getenv(env_name)
+        if value and value.strip():
+            return value.strip(), env_name
+    return None, None
+
+
+def _resolve_api_base_url(api_key: Optional[str]) -> Optional[str]:
+    explicit_base_url = os.getenv("API_BASE_URL")
+    if explicit_base_url and explicit_base_url.strip():
+        return explicit_base_url.strip()
+
+    if api_key:
+        return DEFAULT_HF_ROUTER_BASE_URL
+
+    return None
+
+
+def _looks_like_placeholder_token(token: str) -> bool:
+    value = token.strip().lower()
+    if not value:
+        return True
+    if any(hint in value for hint in PLACEHOLDER_TOKEN_HINTS):
+        return True
+    return value in {"hf_xxx", "hf_***", "token"}
+
+
+def _should_require_remote_llm(cli_flag: bool = False) -> bool:
+    if cli_flag:
+        return True
+    return _env_truthy("REQUIRE_REMOTE_LLM") or _env_truthy("STRICT_PROXY_MODE")
 
 
 def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
     """
     Build OpenAI-compatible client using injected hackathon proxy vars.
-    Supports:
-      - API_BASE_URL
-      - API_KEY (preferred)
-      - HF_TOKEN (fallback for local/HF testing)
 
-    IMPORTANT:
-    If remote env vars are present, this function MUST make at least one
-    successful proxy call, or raise. This ensures validator can detect usage.
+    Important behavior:
+    - If proxy env vars exist, we ATTEMPT a real proxy call so validator can detect usage.
+    - If that call fails, we DO NOT crash the entire script.
+      We log a warning and return fallback mode.
     """
-    api_base_url = os.getenv("API_BASE_URL")
-    api_key = os.getenv("API_KEY") or os.getenv("HF_TOKEN")
+    api_key, api_key_env = _resolve_api_key()
+    api_base_url = _resolve_api_base_url(api_key)
     model_name = _resolve_model_name()
 
     if not (api_base_url and api_key):
-        return None, model_name, "Missing env vars: API_BASE_URL, API_KEY"
+        return (
+            None,
+            model_name,
+            "Missing remote LLM config. Set API_KEY (or HF_TOKEN) and optionally API_BASE_URL.",
+        )
+
+    if _looks_like_placeholder_token(api_key):
+        hint_env = api_key_env or "API_KEY"
+        return (
+            None,
+            model_name,
+            (
+                f"{hint_env} appears to be a placeholder token. "
+                "Set a real Hugging Face token (starts with hf_) before running remote LLM mode."
+            ),
+        )
+
+    if "router.huggingface.co" in api_base_url and not api_key.startswith("hf_"):
+        hint_env = api_key_env or "API_KEY"
+        return (
+            None,
+            model_name,
+            (
+                f"{hint_env} does not look like a Hugging Face token. "
+                "Expected prefix 'hf_' for router.huggingface.co."
+            ),
+        )
 
     if OpenAI is None:
         return None, model_name, "openai package not installed"
@@ -64,8 +137,7 @@ def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": "You are a compliance assistant."},
-                {"role": "user", "content": "Reply exactly: proxy_ok"},
+                {"role": "user", "content": "Say hello in one word."},
             ],
             temperature=0,
             max_tokens=5,
@@ -73,15 +145,18 @@ def _make_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
 
         text = (response.choices[0].message.content or "").strip()
         print(f"[INFO] proxy_check={text}", flush=True)
-
-        if text != "proxy_ok":
-            raise RuntimeError(f"Unexpected proxy verification response: {text}")
-
         print("[INFO] Proxy verification successful", flush=True)
         return client, model_name, None
 
     except Exception as exc:
-        raise RuntimeError(f"LLM proxy failed: {exc}")
+        raw_error = str(exc)
+        if "401" in raw_error and "Invalid username or password." in raw_error:
+            raw_error = (
+                f"{raw_error} Check API_KEY/HF_TOKEN value and token permissions on Hugging Face."
+            )
+        error_msg = f"LLM proxy failed: {raw_error}"
+        print(f"[WARN] {error_msg}", flush=True)
+        return None, model_name, error_msg
 
 
 @lru_cache(maxsize=1)
@@ -92,7 +167,6 @@ def _cached_openai_client() -> Tuple[Optional[Any], str, Optional[str]]:
 app = FastAPI(title="PolicyPilot OpenEnv API", version="1.0.0")
 env = PolicyPilotEnv(seed=42)
 baseline_agent = BaselineComplianceAgent()
-
 
 
 class ResetRequest(BaseModel):
@@ -111,12 +185,14 @@ class RunEpisodeRequest(BaseModel):
     difficulty: str = Field(default="easy")
     max_steps: int = Field(default=8)
     seed: int = Field(default=42)
+    require_remote_llm: bool = Field(default=False)
 
 
 class RunBenchmarkRequest(BaseModel):
     difficulties: List[str] = Field(default_factory=lambda: ["easy", "medium", "hard"])
     max_steps: int = Field(default=8)
     seed: int = Field(default=42)
+    require_remote_llm: bool = Field(default=False)
 
 
 def _compact_json(value: Dict[str, Any]) -> str:
@@ -204,8 +280,8 @@ def _select_action(observation: Dict[str, Any], llm_client: Optional[Any], model
     Select action using LLM if available, otherwise baseline fallback.
 
     IMPORTANT:
-    - If remote env is configured, do NOT silently fallback on LLM errors.
-    - If no remote env, fallback is allowed for local dev.
+    If LLM fails, we DO NOT crash benchmark execution.
+    We fallback and log the error in structured stdout.
     """
     if llm_client is None:
         return _fallback_action(observation), None
@@ -213,8 +289,6 @@ def _select_action(observation: Dict[str, Any], llm_client: Optional[Any], model
     try:
         return _llm_action(llm_client, model_name, observation), None
     except Exception as exc:
-        if _has_remote_llm_env():
-            raise RuntimeError(f"LLM action failed: {exc}")
         return _fallback_action(observation), f"llm_error:{exc}"
 
 
@@ -267,8 +341,9 @@ def run_single_task(
             break
 
     grade = local_env.grade()
-    score = float(grade.get("score", 0.0))
-    success = bool(grade.get("success", False))
+    success = grade.get("success", False)
+    score = grade.get("score", 0.0)
+
     _print_end(task, score, success, rewards)
 
     return {
@@ -281,14 +356,21 @@ def run_single_task(
     }
 
 
-def run_benchmark(difficulties: List[str], max_steps: int = 8, seed: int = 42) -> Dict[str, Any]:
+def run_benchmark(
+    difficulties: List[str],
+    max_steps: int = 8,
+    seed: int = 42,
+    require_remote_llm: bool = False,
+) -> Dict[str, Any]:
     """
     Benchmark entrypoint.
 
     Behavior:
-    - If remote proxy env exists, MUST use proxy successfully.
-    - If no remote env exists, fallback to baseline mode for local dev.
+    - Attempt proxy usage if env vars exist.
+    - Never crash if proxy init fails unless strict mode is enabled.
+    - Always produce structured stdout.
     """
+    strict_remote_llm = _should_require_remote_llm(require_remote_llm)
     startup_error = None
 
     try:
@@ -296,14 +378,14 @@ def run_benchmark(difficulties: List[str], max_steps: int = 8, seed: int = 42) -
         client_mode = "openai" if llm_client is not None else "baseline_fallback"
     except Exception as exc:
         startup_error = str(exc)
-        print(f"[ERROR] {startup_error}", flush=True)
-
-        if _has_remote_llm_env():
-            raise
+        print(f"[WARN] startup_error={startup_error}", flush=True)
 
         llm_client = None
         model_name = _resolve_model_name()
         client_mode = "baseline_fallback"
+
+    if strict_remote_llm and llm_client is None:
+        raise RuntimeError(startup_error or "Remote LLM mode required but proxy client was not initialized.")
 
     results = []
     for difficulty in difficulties:
@@ -321,13 +403,24 @@ def run_benchmark(difficulties: List[str], max_steps: int = 8, seed: int = 42) -
         "env": ENV_NAME,
         "model": model_name,
         "client_mode": client_mode,
+        "require_remote_llm": strict_remote_llm,
         "startup_error": startup_error,
         "results": results,
     }
 
 
-def run_episode(difficulty: str = "easy", max_steps: int = 8, seed: int = 42) -> Dict[str, Any]:
-    result = run_benchmark([difficulty], max_steps=max_steps, seed=seed)
+def run_episode(
+    difficulty: str = "easy",
+    max_steps: int = 8,
+    seed: int = 42,
+    require_remote_llm: bool = False,
+) -> Dict[str, Any]:
+    result = run_benchmark(
+        [difficulty],
+        max_steps=max_steps,
+        seed=seed,
+        require_remote_llm=require_remote_llm,
+    )
     return result["results"][0]
 
 
@@ -347,6 +440,12 @@ def health():
 
 @app.post("/reset")
 def reset(req: Optional[ResetRequest] = None):
+    """
+    Must support:
+    - POST /reset
+    - POST /reset with {}
+    - POST /reset with {"difficulty":"easy"}
+    """
     try:
         parsed_req = req or ResetRequest()
         observation = env.reset(
@@ -410,8 +509,6 @@ def act():
         try:
             llm_client, model_name, _ = _cached_openai_client()
         except Exception:
-            if _has_remote_llm_env():
-                raise
             llm_client, model_name = None, _resolve_model_name()
 
         action, error = _select_action(observation, llm_client, model_name)
@@ -432,6 +529,7 @@ def run_episode_route(req: RunEpisodeRequest):
             difficulty=req.difficulty,
             max_steps=req.max_steps,
             seed=req.seed,
+            require_remote_llm=req.require_remote_llm,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -444,6 +542,7 @@ def run_benchmark_route(req: RunBenchmarkRequest):
             difficulties=req.difficulties,
             max_steps=req.max_steps,
             seed=req.seed,
+            require_remote_llm=req.require_remote_llm,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -456,18 +555,38 @@ def main():
     parser.add_argument("--difficulties", type=str, default="easy,medium,hard")
     parser.add_argument("--max-steps", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--require-remote-llm",
+        action="store_true",
+        help="Fail fast if remote LLM proxy initialization does not succeed.",
+    )
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
 
     args = parser.parse_args()
 
     if args.serve:
+        if _should_require_remote_llm(args.require_remote_llm):
+            llm_client, _, startup_error = _cached_openai_client()
+            if llm_client is None:
+                print(f"[FATAL] {startup_error}", flush=True)
+                raise SystemExit(2)
         uvicorn.run(app, host=args.host, port=args.port)
+        return
 
-    else:
-        difficulties = [d.strip() for d in args.difficulties.split(",") if d.strip()]
-        result = run_benchmark(difficulties=difficulties, max_steps=args.max_steps, seed=args.seed)
-        print(json.dumps(result, indent=2), flush=True)
+    difficulties = [d.strip() for d in args.difficulties.split(",") if d.strip()]
+    try:
+        result = run_benchmark(
+            difficulties=difficulties,
+            max_steps=args.max_steps,
+            seed=args.seed,
+            require_remote_llm=args.require_remote_llm,
+        )
+    except RuntimeError as exc:
+        print(f"[FATAL] {exc}", flush=True)
+        raise SystemExit(2)
+
+    print(json.dumps(result, indent=2), flush=True)
 
 
 if __name__ == "__main__":

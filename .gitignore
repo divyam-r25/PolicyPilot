@@ -4,3 +4,5 @@ __pycache__/
 pytest-cache-files-*/
 .venv/
 venv/
+.env
+.env.local
