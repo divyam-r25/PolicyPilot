@@ -18,3 +18,5 @@ def test_step_valid() -> None:
     assert observation["state"]["decision"] == "reject_case"
     assert info["validation"]["is_valid"] is True
     assert info["analysis"]["recommended_action"] in {"reject_case", "escalate_case"}
+    assert 0.0 < info["score"] < 1.0
+    assert env.state()["score"] == info["score"]

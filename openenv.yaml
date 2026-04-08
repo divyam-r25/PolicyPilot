@@ -21,7 +21,7 @@ tasks:
     success_metric:
       name: score
       threshold: 0.85
-      range: [0.0, 1.0]
+      range: [0.0001, 0.9999]
 
 evaluation:
   deterministic: true

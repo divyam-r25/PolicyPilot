@@ -15,6 +15,7 @@ def test_grader_easy_medium_hard() -> None:
     )
     easy_grade = env.grade()
     assert easy_grade["score"] >= 0.85
+    assert 0.0 < easy_grade["score"] < 1.0
     assert "subscores" in easy_grade
 
     medium_observation = env.reset(difficulty="medium")
@@ -42,4 +43,5 @@ def test_grader_easy_medium_hard() -> None:
     )
     hard_grade = env.grade()
     assert hard_grade["score"] >= 0.85
+    assert 0.0 < hard_grade["score"] < 1.0
     assert "episode_trace" in hard_grade

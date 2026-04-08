@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from src.agents.baseline import BaselineComplianceAgent
 from src.env.core import PolicyPilotEnv
+from src.graders.common import clamp_task_score
 
 try:
     from openai import OpenAI
@@ -341,8 +342,12 @@ def run_single_task(
             break
 
     grade = local_env.grade()
-    success = grade.get("success", False)
-    score = grade.get("score", 0.0)
+    raw_score = grade.get("score", 0.5)
+    try:
+        score = clamp_task_score(float(raw_score))
+    except (TypeError, ValueError):
+        score = clamp_task_score(0.5)
+    success = bool(grade.get("success", score >= 0.85))
 
     _print_end(task, score, success, rewards)
 

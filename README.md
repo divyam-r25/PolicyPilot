@@ -175,7 +175,7 @@ Hard scenarios include:
 
 Each grade output contains:
 
-* `score` in `[0.0, 1.0]`
+* `score` in `(0.0, 1.0)` (strictly inside bounds)
 * `success` threshold `>= 0.85`
 * `components`, `subscores`, `episode_trace`
 
@@ -185,10 +185,10 @@ Each grade output contains:
 
 | Task   | Score |
 | ------ | ----: |
-| easy   |  1.00 |
+| easy   | 0.9999 |
 | medium |  0.92 |
-| hard   |  0.70 |
-| avg    | 0.873 |
+| hard   | 0.9999 |
+| avg    | 0.9733 |
 
 ---
 

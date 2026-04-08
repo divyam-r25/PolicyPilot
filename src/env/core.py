@@ -158,7 +158,10 @@ class PolicyPilotEnv:
             "episode_trace": list(state.history),
         }
         if state.done:
-            info["grade"] = self.grade()
+            grade = self.grade()
+            info["grade"] = grade
+            info["score"] = grade.get("score")
+            info["success"] = grade.get("success")
 
         return self._build_observation(), reward_result.reward, state.done, info
 
@@ -170,6 +173,10 @@ class PolicyPilotEnv:
         payload["scenario_id"] = scenario.id if scenario else None
         payload["success_metric_threshold"] = 0.85
         payload["episode_trace"] = list(self._state.history)
+        if self._state.done and scenario is not None:
+            final_grade = self.grade()
+            payload["score"] = final_grade.get("score")
+            payload["success"] = final_grade.get("success")
         return payload
 
     def grade(self) -> Dict[str, Any]:
