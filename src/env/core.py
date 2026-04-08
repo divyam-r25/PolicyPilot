@@ -179,6 +179,11 @@ class PolicyPilotEnv:
         result["episode_trace"] = list(self._state.history)
         return result
 
+    def observation(self) -> Dict[str, Any]:
+        if self.current_scenario is None or self._state is None:
+            raise RuntimeError("Environment is not initialized. Call reset() first.")
+        return self._build_observation()
+
     def _build_observation(self) -> Dict[str, Any]:
         if self.current_scenario is None or self._state is None:
             raise RuntimeError("Environment is not initialized. Call reset() first.")

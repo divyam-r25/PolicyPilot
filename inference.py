@@ -502,14 +502,12 @@ def act():
     otherwise baseline fallback.
     """
     try:
-        observation = {
-            "task": env.current_task,
-            "case": env.current_case,
-            "documents": env.current_documents,
-            "policy": env.current_policy,
-            "state": env.state(),
-            "allowed_actions": env.allowed_actions(),
-        }
+        if env.current_scenario is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Environment is not initialized. Call /reset first.",
+            )
+        observation = env.observation()
 
         try:
             llm_client, model_name, _ = _cached_openai_client()
@@ -523,6 +521,8 @@ def act():
             "model": model_name,
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
